@@ -36,3 +36,4 @@ twilio==4.4.0
 vobject
 wsgiref==0.1.2
 django-twilio
+psycopg2==2.5.1
