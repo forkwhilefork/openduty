@@ -7,7 +7,7 @@ from hashlib import sha1
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
 from django.utils.encoding import python_2_unicode_compatible
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Group
 from django.core.exceptions import ValidationError
 from schedule.models import Calendar
 from django.contrib.auth import models as auth_models
@@ -71,6 +71,7 @@ class Service(models.Model):
     policy = models.ForeignKey(SchedulePolicy, blank=True, null=True)
     escalate_after = models.IntegerField(blank=True, null=True)
     notifications_disabled = models.BooleanField(default=False)
+    send_resolve_enabled = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = _('service')
@@ -88,6 +89,7 @@ class EventLog(models.Model):
     Event Log
     """
     ACTIONS = (('acknowledge', 'acknowledge'),
+               ('unacknowledge', 'unacknowledge'),
                ('resolve', 'resolve'),
                ('silence_service', 'silence service'),
                ('unsilence_service', 'unsilence service'),
@@ -102,12 +104,14 @@ class EventLog(models.Model):
     @property
     def color(self):
         colort_dict = {'acknowledge': 'warning',
+                       'unacknowledge' : 'warning',
                        'resolve': 'success',
                        'silence_service': 'active',
                        'unsilence_service': 'active',
                        'silence_incident': 'active',
                        'unsilence_incident': 'active',
                        'forward': 'info',
+                        'escalate': 'info',
                        'trigger': 'trigger',
                        'notified': 'success',
                        'notification_failed': 'danger',
@@ -136,19 +140,23 @@ class Incident(models.Model):
     TRIGGER = "trigger"
     RESOLVE = "resolve"
     ACKNOWLEDGE = "acknowledge"
+    UNACKNOWLEDGE = "unacknowledge"
+    ESCALATE = "escalate"
     """
     Incidents are representations of a malfunction in the system.
     """
-    service_key = models.ForeignKey(Service)
+    service_key = models.ForeignKey(Service,related_name="incident")
     incident_key = models.CharField(max_length=200)
     event_type = models.CharField(max_length=15)
     description = models.CharField(max_length=200)
     details = models.TextField()
     occurred_at = models.DateTimeField()
+    service_to_escalate_to = models.ForeignKey(Service,related_name="service_to_escalate_to_id",null=True, blank=True, default = None)
 
     @property
     def color(self):
         colort_dict = {'acknowledge': 'warning',
+                       'unacknowledge': 'warning',
                        'resolve': 'success',
                        'silence_service': 'active',
                        'silence_incident': 'active',
@@ -168,8 +176,8 @@ class Incident(models.Model):
     def natural_key(self):
         return (self.service_key, self.incident_key)
     def clean(self):
-        if self.event_type not in ['trigger', 'acknowledge', 'resolve']:
-            raise ValidationError("'%s' is an invalid event type, valid values are 'trigger', 'acknowledge' and 'resolve'" % self.event_type)
+        if self.event_type not in ['trigger', 'acknowledge','unacknowledge', 'resolve']:
+            raise ValidationError("'%s' is an invalid event type, valid values are 'trigger', 'acknowledge', 'unacknowledge' and 'resolve'" % self.event_type)
 
 @python_2_unicode_compatible
 class ServiceTokens(models.Model):
@@ -198,6 +206,7 @@ class SchedulePolicyRule(models.Model):
     schedule_policy = models.ForeignKey(SchedulePolicy, related_name='rules')
     position = models.IntegerField()
     user_id = models.ForeignKey(User, blank=True, null=True)
+    group_id = models.ForeignKey(Group, blank=True, null=True)
     schedule = models.ForeignKey(Calendar, blank=True, null=True)
     escalate_after = models.IntegerField()
 
@@ -210,7 +219,7 @@ class SchedulePolicyRule(models.Model):
 
     @classmethod
     def getRulesForService(cls, service):
-        return cls.objects.filter(schedule_policy=service.policy)
+        return cls.objects.filter(schedule_policy=service.policy.id)
 
 class UserProfile(models.Model):
     user = models.OneToOneField('auth.User', related_name='profile')
@@ -222,6 +231,9 @@ class UserProfile(models.Model):
     prowl_application = models.CharField(max_length=256, blank=True)
     prowl_url = models.CharField(max_length=512, blank=True)
     rocket_webhook_url = models.CharField(max_length=512, blank=True)
+    hipchat_room_name = models.CharField(max_length=100)
+    hipchat_room_url = models.CharField(max_length=100)
+    send_resolve_enabled = models.BooleanField(default=False)
 
 class ServiceSilenced(models.Model):
     service = models.ForeignKey(Service)
